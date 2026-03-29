@@ -1,3 +1,7 @@
+# Project docs (local only)
+CLAUDE.md
+PLAN.md
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -74,6 +78,9 @@ docs/_build/
 # PyBuilder
 .pybuilder/
 target/
+
+# Streamlit secrets (NEVER commit)
+.streamlit/secrets.toml
 
 # Jupyter Notebook
 .ipynb_checkpoints
