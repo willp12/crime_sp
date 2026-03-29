@@ -1,0 +1,70 @@
+name: Pipeline de dados SSP-SP
+
+on:
+  schedule:
+    # Roda dia 5 e 20 de cada mes as 8h UTC
+    - cron: "0 8 5,20 * *"
+
+  workflow_dispatch:
+    inputs:
+      ano:
+        description: "Ano para download (default: ano atual)"
+        required: false
+        type: string
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+      AWS_REGION: us-east-1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install polars fastexcel requests boto3
+
+      - name: Determine year
+        id: year
+        run: |
+          if [ -n "${{ inputs.ano }}" ]; then
+            echo "ano=${{ inputs.ano }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ano=$(date +%Y)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download Excel
+        run: python pipeline/download.py --ano ${{ steps.year.outputs.ano }} --output /tmp/raw
+
+      - name: Transform (raw + transformed)
+        run: python pipeline/transform.py --input /tmp/raw --output /tmp/parquet --layer all
+
+      - name: Upload to S3
+        run: python pipeline/upload.py --source /tmp/parquet --bucket $AWS_S3_BUCKET
+
+      - name: Health check
+        run: |
+          pip install duckdb
+          python -c "
+          import duckdb, os
+          conn = duckdb.connect()
+          conn.execute('INSTALL httpfs; LOAD httpfs;')
+          conn.execute(\"SET s3_region='us-east-1'\")
+          conn.execute(f\"SET s3_access_key_id='{os.environ['AWS_ACCESS_KEY_ID']}'\")
+          conn.execute(f\"SET s3_secret_access_key='{os.environ['AWS_SECRET_ACCESS_KEY']}'\")
+          bucket = os.environ['AWS_S3_BUCKET']
+          r = conn.execute(f\"SELECT COUNT(*) as n FROM read_parquet('s3://{bucket}/transformed/parquet/**/*.parquet', hive_partitioning=true)\").fetchone()
+          print(f'Health check: {r[0]} registros no S3')
+          assert r[0] > 0, 'ERRO: nenhum registro encontrado no S3!'
+          "
