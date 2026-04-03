@@ -11,8 +11,11 @@ jobs:
     steps:
       - name: Ping Streamlit app
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -L --max-time 60 https://crimesp.streamlit.app/)
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 https://crimesp.streamlit.app/)
           echo "HTTP status: $STATUS"
-          if [ "$STATUS" != "200" ]; then
-            echo "Aviso: app retornou status $STATUS (pode estar acordando)"
+          # 2xx ou 3xx = servidor respondeu (app vivo ou acordando)
+          # 5xx ou falha de conexao = problema real
+          if [[ "$STATUS" -ge 500 ]] || [[ "$STATUS" == "000" ]]; then
+            echo "ERRO: app retornou status $STATUS"
+            exit 1
           fi
