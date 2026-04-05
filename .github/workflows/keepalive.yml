@@ -9,13 +9,34 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Streamlit app
+      - name: Install Playwright
+        run: pip install playwright && playwright install chromium
+
+      - name: Visit Streamlit app
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 https://crimesp.streamlit.app/)
-          echo "HTTP status: $STATUS"
-          # 2xx ou 3xx = servidor respondeu (app vivo ou acordando)
-          # 5xx ou falha de conexao = problema real
-          if [[ "$STATUS" -ge 500 ]] || [[ "$STATUS" == "000" ]]; then
-            echo "ERRO: app retornou status $STATUS"
-            exit 1
-          fi
+          python << 'PYEOF'
+          from playwright.sync_api import sync_playwright
+          import sys
+
+          URL = "https://crimesp.streamlit.app/"
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch()
+              page = browser.new_page()
+
+              print(f"Abrindo {URL} ...")
+              page.goto(URL, timeout=60000, wait_until="networkidle")
+              title = page.title()
+              print(f"Titulo da pagina: {title}")
+
+              # Se o app estiver dormindo, Streamlit mostra botao de wake
+              wake_btn = page.locator("button:has-text('wake up'), button:has-text('Yes, get this app back up!')")
+              if wake_btn.count() > 0:
+                  print("App dormindo — clicando botao de wake...")
+                  wake_btn.first.click()
+                  page.wait_for_timeout(30000)
+                  print(f"Titulo apos wake: {page.title()}")
+
+              browser.close()
+              print("Keepalive concluido com sucesso")
+          PYEOF
