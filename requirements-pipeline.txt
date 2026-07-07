@@ -1,0 +1,13 @@
+# Pinned dependencies for the Airflow task image (Dockerfile) ONLY.
+# Exact pins on purpose: the DAG force-pulls :latest, so floor-only ranges
+# would let any rebuild silently jump polars/fastexcel major versions and
+# change transform behavior with no code change in this repo. Bump these
+# deliberately and re-run the pipeline to validate.
+#
+# requirements.txt (floor ranges, app + pipeline) remains what the GH Actions
+# pipeline.yml installs during the parallel-run window.
+polars==1.42.1
+fastexcel==0.20.2
+requests==2.34.2
+boto3==1.43.41
+duckdb==1.5.4

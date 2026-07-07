@@ -1,0 +1,74 @@
+name: deploy
+
+# Publishes this repo's Airflow runtime artifacts on every push to main:
+#   1. Dockerfile  -> Artifact Registry (pipelines/crime_sp:latest + :git-sha)
+#   2. dags/       -> gs://PROJECT-airflow-dags/dags/crime_sp/  (VM syncs every 60 s)
+#
+# Mirrors the deploy workflow of github.com/willp12/airflow — see that repo's
+# docs/integration-guide.md for the full integration contract.
+#
+# Repo variables required (Settings -> Secrets and variables -> Actions -> Variables):
+#   GCP_PROJECT_ID   — the GCP project id
+#   GCP_WIF_PROVIDER — airflow repo: terraform output wif_provider
+#   GCP_DEPLOYER_SA  — airflow repo: terraform output deployer_sa_email
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pipeline/**"
+      - "dags/**"
+      - "Dockerfile"
+      - ".dockerignore" # affects the build context (recursive excludes inside pipeline/)
+      - "requirements-pipeline.txt" # the deps the Dockerfile actually installs
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # WIF auth to GCP
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  # Pinned assumption: platform region us-central1 and standard bucket naming.
+  # If those ever change, take the real values from the airflow repo's
+  # `terraform output artifact_registry_url / dags_bucket`.
+  REGISTRY: us-central1-docker.pkg.dev
+  IMAGE: us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/pipelines/crime_sp
+  DAGS_BUCKET: ${{ vars.GCP_PROJECT_ID }}-airflow-dags
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Authenticate to GCP via Workload Identity Federation
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGISTRY }} --quiet
+
+      - name: Build and push crime_sp image
+        run: |
+          docker buildx build . \
+            -t "${IMAGE}:latest" \
+            -t "${IMAGE}:${{ github.sha }}" \
+            --push
+
+      # --delete-unmatched-destination-objects keeps the bucket an exact mirror
+      # of the repo: a DAG deleted here disappears from the VM within ~60 s.
+      # Scoped to this repo's subfolder — other repos own dags/<repo>/.
+      - name: Sync DAGs to the bucket
+        run: |
+          gcloud storage rsync --recursive --delete-unmatched-destination-objects \
+            dags/ "gs://${DAGS_BUCKET}/dags/crime_sp/"

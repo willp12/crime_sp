@@ -1,0 +1,20 @@
+# Keep the pipeline image minimal: only pipeline/ is copied in, but a small
+# build context also makes builds faster and prevents accidental secret bakes.
+.git
+.github
+.streamlit
+app
+src
+tests
+queries
+dags
+.venv
+__pycache__
+*.pyc
+*.csv
+*.xlsx
+*.parquet
+CLAUDE.md
+PLAN.md
+README.md
+LICENSE
