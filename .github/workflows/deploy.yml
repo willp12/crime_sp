@@ -24,6 +24,12 @@ on:
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
+# One deploy at a time, never cancelling a running one: two quick pushes must
+# not finish out of order and leave :latest/the bucket on the older commit.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
 permissions:
   contents: read
   id-token: write # WIF auth to GCP

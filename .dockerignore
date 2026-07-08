@@ -9,11 +9,14 @@ tests
 queries
 dags
 .venv
-__pycache__
-*.pyc
-*.csv
-*.xlsx
-*.parquet
+# `**/` because in .dockerignore `*` does not cross `/` — without it only the
+# context root is excluded and nested artifacts (pipeline/**/__pycache__,
+# stray data files) would still enter the image via COPY.
+**/__pycache__
+**/*.pyc
+**/*.csv
+**/*.xlsx
+**/*.parquet
 CLAUDE.md
 PLAN.md
 README.md
