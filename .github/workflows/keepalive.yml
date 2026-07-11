@@ -22,7 +22,10 @@ jobs:
           URL = "https://crimesp.streamlit.app/"
           MAX_ATTEMPTS = 2
 
-          # Locator do botao de wake (app dormindo) e do conteudo renderizado
+          # No Streamlit Community Cloud o app roda dentro de um iframe same-origin
+          # (src ".../~/+/"). O conteudo renderizado e o botao de wake (quando o
+          # app esta dormindo) vivem DENTRO desse iframe, nao no frame principal.
+          IFRAME_SELECTOR = "iframe[src*='/~/+/']"
           WAKE_SELECTOR = "button:has-text('wake up'), button:has-text('Yes, get this app back up!')"
           APP_SELECTOR = "[data-testid='stApp'], .stApp"
 
@@ -30,23 +33,28 @@ jobs:
               print(f"Abrindo {URL} ...")
               page.goto(URL, timeout=120000, wait_until="domcontentloaded")
 
-              # Espera o app renderizar OU o botao de wake aparecer
+              # Espera o iframe do app existir no frame principal
+              print("Aguardando iframe do app...")
+              page.wait_for_selector(IFRAME_SELECTOR, timeout=120000)
+              app = page.frame_locator(IFRAME_SELECTOR)
+
+              # Dentro do iframe: espera o app renderizar OU o botao de wake aparecer
               print("Aguardando app renderizar ou botao de wake...")
-              page.wait_for_selector(
-                  f"{APP_SELECTOR}, {WAKE_SELECTOR}",
-                  timeout=120000,
+              app.locator(f"{APP_SELECTOR}, {WAKE_SELECTOR}").first.wait_for(
+                  state="visible", timeout=120000
               )
 
-              title = page.title()
-              print(f"Titulo da pagina: {title}")
+              print(f"Titulo da pagina: {page.title()}")
 
-              # Se o app estiver dormindo, Streamlit mostra botao de wake
-              wake_btn = page.locator(WAKE_SELECTOR)
+              # Se o app estiver dormindo, Streamlit mostra botao de wake no iframe
+              wake_btn = app.locator(WAKE_SELECTOR)
               if wake_btn.count() > 0:
                   print("App dormindo — clicando botao de wake...")
                   wake_btn.first.click()
                   page.wait_for_timeout(30000)
                   print(f"Titulo apos wake: {page.title()}")
+              else:
+                  print("App acordado — conteudo renderizado.")
 
               print("Keepalive concluido com sucesso")
 
