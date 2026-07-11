@@ -16,27 +16,58 @@ jobs:
         run: |
           python << 'PYEOF'
           from playwright.sync_api import sync_playwright
+          from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
           import sys
 
           URL = "https://crimesp.streamlit.app/"
+          MAX_ATTEMPTS = 2
 
-          with sync_playwright() as p:
-              browser = p.chromium.launch()
-              page = browser.new_page()
+          # Locator do botao de wake (app dormindo) e do conteudo renderizado
+          WAKE_SELECTOR = "button:has-text('wake up'), button:has-text('Yes, get this app back up!')"
+          APP_SELECTOR = "[data-testid='stApp'], .stApp"
 
+          def visit(page):
               print(f"Abrindo {URL} ...")
-              page.goto(URL, timeout=60000, wait_until="networkidle")
+              page.goto(URL, timeout=120000, wait_until="domcontentloaded")
+
+              # Espera o app renderizar OU o botao de wake aparecer
+              print("Aguardando app renderizar ou botao de wake...")
+              page.wait_for_selector(
+                  f"{APP_SELECTOR}, {WAKE_SELECTOR}",
+                  timeout=120000,
+              )
+
               title = page.title()
               print(f"Titulo da pagina: {title}")
 
               # Se o app estiver dormindo, Streamlit mostra botao de wake
-              wake_btn = page.locator("button:has-text('wake up'), button:has-text('Yes, get this app back up!')")
+              wake_btn = page.locator(WAKE_SELECTOR)
               if wake_btn.count() > 0:
                   print("App dormindo — clicando botao de wake...")
                   wake_btn.first.click()
                   page.wait_for_timeout(30000)
                   print(f"Titulo apos wake: {page.title()}")
 
-              browser.close()
               print("Keepalive concluido com sucesso")
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch()
+              try:
+                  for attempt in range(1, MAX_ATTEMPTS + 1):
+                      page = browser.new_page()
+                      try:
+                          print(f"Tentativa {attempt}/{MAX_ATTEMPTS}")
+                          visit(page)
+                          break
+                      except PlaywrightTimeoutError as e:
+                          print(f"Timeout na tentativa {attempt}/{MAX_ATTEMPTS}: {e}")
+                          if attempt == MAX_ATTEMPTS:
+                              print("Todas as tentativas falharam.")
+                              browser.close()
+                              sys.exit(1)
+                      finally:
+                          page.close()
+              finally:
+                  if browser.is_connected():
+                      browser.close()
           PYEOF
