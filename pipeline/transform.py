@@ -13,6 +13,11 @@ from pathlib import Path
 
 import polars as pl
 
+try:
+    from pipeline.bairros import carregar_aliases, normalize_bairro
+except ImportError:  # execucao direta: python pipeline/transform.py
+    from bairros import carregar_aliases, normalize_bairro
+
 
 def read_excel(excel_path: Path) -> pl.DataFrame:
     """Le Excel com Polars (usa fastexcel como backend).
@@ -143,10 +148,11 @@ def save_transformed(raw_dir: Path, output_dir: Path) -> None:
             .alias("RUBRICA_MOD")
         )
 
-    # Normalizar BAIRRO (upper, trim)
+    # Normalizar BAIRRO preservando o valor original para auditoria
     if "BAIRRO" in df.columns:
+        df = df.with_columns(pl.col("BAIRRO").alias("BAIRRO_ORIGINAL"))
         df = df.with_columns(
-            pl.col("BAIRRO").str.strip_chars().str.to_uppercase()
+            normalize_bairro(pl.col("BAIRRO"), carregar_aliases()).alias("BAIRRO")
         )
 
     # Estatisticas
@@ -158,6 +164,12 @@ def save_transformed(raw_dir: Path, output_dir: Path) -> None:
         print("  Distribuicao RUBRICA_MOD:")
         for row in df["RUBRICA_MOD"].value_counts().sort("count", descending=True).iter_rows():
             print(f"    {row[0]}: {row[1]}")
+
+    if "BAIRRO_ORIGINAL" in df.columns:
+        print(
+            f"  BAIRRO: {df['BAIRRO_ORIGINAL'].n_unique()} valores distintos "
+            f"-> {df['BAIRRO'].n_unique()} apos normalizacao"
+        )
 
     _write_partitioned(df, output_dir, "Transformed")
 

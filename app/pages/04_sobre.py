@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import streamlit as st
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from src.ui import render_freshness_caption  # noqa: E402
 
 st.set_page_config(page_title="Crime SP — Sobre", page_icon="🗺️", layout="wide")
 
 st.title("ℹ️ Sobre o Projeto")
+render_freshness_caption()
 
 st.markdown("""
 ## Fonte dos dados

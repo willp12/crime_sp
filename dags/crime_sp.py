@@ -122,7 +122,8 @@ with DAG(
     upload = DockerOperator(
         task_id="upload",
         command=f"python pipeline/upload.py --source /work/parquet --bucket {S3_BUCKET}",
-        environment=AWS_ENV,
+        # PIPELINE_SOURCE feeds the manifest.json "source" audit field.
+        environment={**AWS_ENV, "PIPELINE_SOURCE": "airflow"},
         mounts=[WORK],
         **COMMON,
     )

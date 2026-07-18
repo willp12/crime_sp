@@ -14,10 +14,12 @@ from streamlit_folium import st_folium
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.data import get_cobertura, get_filter_options, get_mapa_data  # noqa: E402
+from src.ui import render_freshness_caption  # noqa: E402
 
 st.set_page_config(page_title="Crime SP", page_icon="🗺️", layout="wide")
 
 st.title("🗺️ Mapa de Celulares Subtraídos — São Paulo")
+render_freshness_caption()
 
 # --- Sidebar: filtros globais ---
 with st.sidebar:

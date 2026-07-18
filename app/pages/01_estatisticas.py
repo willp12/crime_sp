@@ -17,10 +17,12 @@ from src.charts import (  # noqa: E402
     top_marcas,
 )
 from src.data import get_cobertura, get_estatisticas_data, get_filter_options  # noqa: E402
+from src.ui import render_freshness_caption  # noqa: E402
 
 st.set_page_config(page_title="Crime SP — Estatísticas", page_icon="🗺️", layout="wide")
 
 st.title("📊 Estatísticas — Celulares Subtraídos")
+render_freshness_caption()
 
 # --- Sidebar: filtros globais ---
 with st.sidebar:

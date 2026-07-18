@@ -3,17 +3,28 @@
 Estrutura no bucket:
   s3://crime-data-sp/raw/parquet/ano=YYYY/trimestre=Q/data.parquet
   s3://crime-data-sp/transformed/parquet/ano=YYYY/trimestre=Q/data.parquet
+  s3://crime-data-sp/transformed/_meta/manifest.json  (metadados do ultimo run)
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import boto3
+import polars as pl
 from botocore.exceptions import ClientError
+
+try:
+    from pipeline.transform import _extract_partition_from_path
+except ImportError:  # execucao direta: python pipeline/upload.py
+    from transform import _extract_partition_from_path
+
+MANIFEST_KEY = "transformed/_meta/manifest.json"
 
 
 def get_s3_client() -> boto3.client:
@@ -67,6 +78,55 @@ def upload_directory(
             sys.exit(1)
 
     return uploaded
+
+
+def _detect_source() -> str:
+    """Identifica quem executou o pipeline, para auditoria no manifest."""
+    if os.environ.get("GITHUB_ACTIONS"):
+        return "github-actions"
+    return os.environ.get("PIPELINE_SOURCE", "local")
+
+
+def build_manifest(transformed_dir: Path) -> dict:
+    """Constroi manifest do run com contagens por particao da camada transformed.
+
+    O manifest descreve APENAS este run (particoes presentes no diretorio
+    local), nao o estado global do bucket. A visao completa de particoes no
+    app vem de query DuckDB ao vivo (queries/particoes.sql), nunca daqui.
+    """
+    partitions = []
+    for pq_file in sorted(transformed_dir.rglob("*.parquet")):
+        ano, trimestre = _extract_partition_from_path(pq_file)
+        rows = pl.scan_parquet(pq_file).select(pl.len()).collect().item()
+        partitions.append({"ano": ano, "trimestre": trimestre, "rows": rows})
+
+    return {
+        "schema_version": 1,
+        "processed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "source": _detect_source(),
+        "anos_processados": sorted({p["ano"] for p in partitions if p["ano"] is not None}),
+        "partitions": partitions,
+        "total_rows": sum(p["rows"] for p in partitions),
+    }
+
+
+def upload_manifest(s3_client: boto3.client, manifest: dict, bucket: str) -> None:
+    """Envia o manifest.json para o S3."""
+    body = json.dumps(manifest, ensure_ascii=False, indent=2)
+    try:
+        s3_client.put_object(
+            Bucket=bucket,
+            Key=MANIFEST_KEY,
+            Body=body.encode("utf-8"),
+            ContentType="application/json",
+        )
+    except ClientError as e:
+        print(f"  ERRO no upload do manifest: {e}")
+        sys.exit(1)
+    print(
+        f"  Manifest: s3://{bucket}/{MANIFEST_KEY} "
+        f"({manifest['total_rows']} linhas em {len(manifest['partitions'])} particao(oes))"
+    )
 
 
 def main() -> None:
@@ -125,6 +185,10 @@ def main() -> None:
         count = upload_directory(s3_client, transformed_dir, bucket, "transformed/parquet")
         total_uploaded += count
         print(f"  {count} arquivo(s) enviado(s)")
+
+        if count > 0:
+            manifest = build_manifest(transformed_dir)
+            upload_manifest(s3_client, manifest, bucket)
 
     print(f"\nUpload concluido: {total_uploaded} arquivo(s) total")
 

@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import json
+from datetime import date
 from pathlib import Path
 
+import boto3
 import duckdb
 import polars as pl
 import streamlit as st
 
 S3_TRANSFORMED = "s3://crime-data-sp/transformed/parquet/**/*.parquet"
+
+MANIFEST_KEY = "transformed/_meta/manifest.json"
 
 QUERIES_DIR = Path(__file__).resolve().parent.parent / "queries"
 
@@ -132,6 +137,99 @@ def get_cobertura(ano: int, trimestres: list[int]) -> dict:
     total = df["total"][0]
     com_coords = df["com_coordenadas"][0]
     return {"total": total, "com_coordenadas": com_coords}
+
+
+@st.cache_data(ttl=3600)
+def get_manifest() -> dict | None:
+    """Le o manifest.json gravado pelo pipeline no S3.
+
+    Retorna None se o manifest ainda nao existir (sera gravado pelo proximo
+    run do pipeline) ou em qualquer falha — o app nunca quebra por isso.
+    Com o cache de 1h, a data exibida pode atrasar ate uma hora apos um run.
+    """
+    try:
+        aws = st.secrets["aws"]
+        s3 = boto3.client(
+            "s3",
+            region_name=aws["region"],
+            aws_access_key_id=aws["access_key_id"],
+            aws_secret_access_key=aws["secret_access_key"],
+        )
+        obj = s3.get_object(Bucket=aws["bucket"], Key=MANIFEST_KEY)
+        return json.loads(obj["Body"].read())
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=3600)
+def get_ultimo_registro() -> date | None:
+    """Data do registro mais recente (MAX de DATAHORA_REGISTRO_BO) ou None."""
+    sql = f"""
+    SELECT MAX(TRY_CAST(DATAHORA_REGISTRO_BO AS DATE)) AS ultima
+    FROM read_parquet('{S3_TRANSFORMED}', hive_partitioning=true, union_by_name=true)
+    WHERE CIDADE = 'S.PAULO'
+    """
+    try:
+        df = query_df(sql)
+    except duckdb.Error:
+        return None
+    return df["ultima"][0]
+
+
+@st.cache_data(ttl=3600)
+def get_particoes() -> pl.DataFrame:
+    """Contagens por particao ANO/TRIMESTRE (total e com coordenadas)."""
+    return query_sql_file("particoes.sql", {"s3_path": S3_TRANSFORMED})
+
+
+@st.cache_data(ttl=3600)
+def get_qualidade() -> pl.DataFrame | None:
+    """Metricas de data quality por particao.
+
+    Retorna None se colunas como VERSAO/ANO_BO nao existirem em nenhum
+    arquivo (dados anteriores ao backfill com o pipeline atualizado).
+    """
+    try:
+        return query_sql_file("qualidade.sql", {"s3_path": S3_TRANSFORMED})
+    except duckdb.Error:
+        return None
+
+
+@st.cache_data(ttl=3600)
+def get_variantes_bairro() -> pl.DataFrame | None:
+    """Variantes de grafia de bairro unificadas pela normalizacao.
+
+    Retorna None enquanto BAIRRO_ORIGINAL nao existir nos dados publicados
+    (pre-backfill).
+    """
+    try:
+        return query_sql_file("qualidade_bairros.sql", {"s3_path": S3_TRANSFORMED})
+    except duckdb.Error:
+        return None
+
+
+@st.cache_data(ttl=3600)
+def get_comparativo_mensal(ano_a: int, ano_b: int, trimestres: list[int]) -> pl.DataFrame:
+    """Serie mensal agregada de dois anos (ANO, MES, RUBRICA_MOD, total, com_coordenadas)."""
+    params = {
+        "s3_path": S3_TRANSFORMED,
+        "ano_a": ano_a,
+        "ano_b": ano_b,
+        "trimestres": _sql_list(trimestres),
+    }
+    return query_sql_file("comparativo_mensal.sql", params)
+
+
+@st.cache_data(ttl=3600)
+def get_comparativo_bairros(ano_a: int, ano_b: int, trimestres: list[int]) -> pl.DataFrame:
+    """Contagens por bairro nos dois anos (BAIRRO, total_atual, total_anterior)."""
+    params = {
+        "s3_path": S3_TRANSFORMED,
+        "ano_a": ano_a,
+        "ano_b": ano_b,
+        "trimestres": _sql_list(trimestres),
+    }
+    return query_sql_file("comparativo_bairros.sql", params)
 
 
 def _build_filters(
