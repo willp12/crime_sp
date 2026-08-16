@@ -32,7 +32,17 @@ from airflow.sdk import DAG
 from docker.types import Mount
 
 PROJECT_ID = os.environ["GCP_PROJECT_ID"]  # injected into the scheduler by the stack
-IMAGE = f"us-central1-docker.pkg.dev/{PROJECT_ID}/pipelines/crime_sp:latest"
+
+# Local mode: AIRFLOW_LOCAL=1 (set only by the local Docker Desktop stack)
+# flips the image to the locally built tag. No ADC mount here — this pipeline
+# talks only to S3 (AWS creds via Airflow Variables), never to GCP. The
+# variable is absent on the VM and in CI, so cloud behaviour is unchanged.
+LOCAL = os.environ.get("AIRFLOW_LOCAL") == "1"
+IMAGE = (
+    "pipelines/crime_sp:local"
+    if LOCAL
+    else f"us-central1-docker.pkg.dev/{PROJECT_ID}/pipelines/crime_sp:latest"
+)
 
 S3_BUCKET = "crime-data-sp"
 
@@ -56,7 +66,7 @@ AWS_ENV = {
 
 COMMON = dict(
     image=IMAGE,
-    force_pull=True,       # deploying = pushing a new :latest image
+    force_pull=not LOCAL,  # cloud deploy = pushing a new :latest; local images are built in place
     auto_remove="force",   # never leak stopped containers on a 30 GB disk
     mount_tmp_dir=False,   # no host tmp coupling
     mem_limit="1g",        # the VM has 4 GB total — always cap
