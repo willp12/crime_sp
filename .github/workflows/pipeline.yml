@@ -14,7 +14,7 @@ on:
 
 jobs:
   pipeline:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     env:
@@ -68,3 +68,16 @@ jobs:
           print(f'Health check: {r[0]} registros no S3')
           assert r[0] > 0, 'ERRO: nenhum registro encontrado no S3!'
           "
+
+  # Reserva do keepalive.yml, que ja reabilita este workflow a cada 2h: em repo
+  # publico, o GitHub desativa workflows agendados apos 60 dias sem atividade.
+  manter-agendamento:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Reabilitar este workflow
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/pipeline.yml/enable"

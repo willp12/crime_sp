@@ -13,6 +13,7 @@ from streamlit_folium import st_folium
 # Adicionar raiz do projeto ao path para imports de src/
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from src.basemap import criar_tile_layer  # noqa: E402
 from src.data import get_cobertura, get_filter_options, get_mapa_data  # noqa: E402
 from src.ui import render_freshness_caption  # noqa: E402
 
@@ -75,10 +76,11 @@ col3.metric("Cobertura geo", f"{pct:.1f}%")
 if df_mapa.shape[0] == 0:
     st.info("Nenhum BO com coordenadas para os filtros selecionados.")
 else:
+    carto_key = st.secrets.get("carto", {}).get("api_key")
     mapa = folium.Map(
         location=[-23.5505, -46.6333],
         zoom_start=11,
-        tiles="CartoDB positron",
+        tiles=criar_tile_layer(carto_key),
     )
 
     coords = df_mapa.select("LATITUDE", "LONGITUDE").to_numpy().tolist()

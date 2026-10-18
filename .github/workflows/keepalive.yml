@@ -2,80 +2,65 @@ name: Keep Streamlit alive
 
 on:
   schedule:
-    - cron: "0 */8 * * *"  # a cada 8h: 00h, 08h, 16h UTC
+    # O Community Cloud hiberna o app apos 12h sem trafego, e o GitHub atrasa
+    # (1-6h) ou descarta execucoes agendadas no topo da hora. A cada 2h, no
+    # minuto 37, o intervalo real fica bem abaixo de 12h mesmo com perdas.
+    - cron: "37 */2 * * *"
   workflow_dispatch:         # permite teste manual
+
+permissions:
+  contents: read
 
 jobs:
   ping:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: keepalive
+      cancel-in-progress: false
+    env:
+      PYTHONUNBUFFERED: "1"
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install Playwright
-        run: pip install playwright && playwright install chromium
+        run: |
+          pip install playwright==1.63.0
+          playwright install --with-deps chromium
 
       - name: Visit Streamlit app
+        run: python scripts/keepalive.py
+
+      - name: Upload evidencias
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keepalive-evidencias
+          path: keepalive-artifacts/
+          retention-days: 7
+
+  # Em repo publico, o GitHub desativa workflows agendados apos 60 dias sem
+  # atividade no repo (foi o que parou este keepalive em out/2026). Reabilitar
+  # pela API antes do prazo zera o contador sem commits artificiais: e a mesma
+  # chamada da action liskin/gh-workflow-keepalive. Job separado para rodar
+  # mesmo quando o ping falha.
+  manter-agendamentos:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Reabilitar workflows agendados
         run: |
-          python << 'PYEOF'
-          from playwright.sync_api import sync_playwright
-          from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-          import sys
-
-          URL = "https://crimesp.streamlit.app/"
-          MAX_ATTEMPTS = 2
-
-          # No Streamlit Community Cloud o app roda dentro de um iframe same-origin
-          # (src ".../~/+/"). O conteudo renderizado e o botao de wake (quando o
-          # app esta dormindo) vivem DENTRO desse iframe, nao no frame principal.
-          IFRAME_SELECTOR = "iframe[src*='/~/+/']"
-          WAKE_SELECTOR = "button:has-text('wake up'), button:has-text('Yes, get this app back up!')"
-          APP_SELECTOR = "[data-testid='stApp'], .stApp"
-
-          def visit(page):
-              print(f"Abrindo {URL} ...")
-              page.goto(URL, timeout=120000, wait_until="domcontentloaded")
-
-              # Espera o iframe do app existir no frame principal
-              print("Aguardando iframe do app...")
-              page.wait_for_selector(IFRAME_SELECTOR, timeout=120000)
-              app = page.frame_locator(IFRAME_SELECTOR)
-
-              # Dentro do iframe: espera o app renderizar OU o botao de wake aparecer
-              print("Aguardando app renderizar ou botao de wake...")
-              app.locator(f"{APP_SELECTOR}, {WAKE_SELECTOR}").first.wait_for(
-                  state="visible", timeout=120000
-              )
-
-              print(f"Titulo da pagina: {page.title()}")
-
-              # Se o app estiver dormindo, Streamlit mostra botao de wake no iframe
-              wake_btn = app.locator(WAKE_SELECTOR)
-              if wake_btn.count() > 0:
-                  print("App dormindo — clicando botao de wake...")
-                  wake_btn.first.click()
-                  page.wait_for_timeout(30000)
-                  print(f"Titulo apos wake: {page.title()}")
-              else:
-                  print("App acordado — conteudo renderizado.")
-
-              print("Keepalive concluido com sucesso")
-
-          with sync_playwright() as p:
-              browser = p.chromium.launch()
-              try:
-                  for attempt in range(1, MAX_ATTEMPTS + 1):
-                      page = browser.new_page()
-                      try:
-                          print(f"Tentativa {attempt}/{MAX_ATTEMPTS}")
-                          visit(page)
-                          break
-                      except PlaywrightTimeoutError as e:
-                          print(f"Timeout na tentativa {attempt}/{MAX_ATTEMPTS}: {e}")
-                          if attempt == MAX_ATTEMPTS:
-                              print("Todas as tentativas falharam.")
-                              browser.close()
-                              sys.exit(1)
-                      finally:
-                          page.close()
-              finally:
-                  if browser.is_connected():
-                      browser.close()
-          PYEOF
+          for wf in keepalive.yml pipeline.yml; do
+            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/$wf/enable"
+            echo "Reabilitado: $wf"
+          done
