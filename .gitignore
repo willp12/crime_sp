@@ -82,6 +82,9 @@ target/
 # Streamlit secrets (NEVER commit)
 .streamlit/secrets.toml
 
+# Evidencias gravadas pelo scripts/keepalive.py quando falha
+keepalive-artifacts/
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
