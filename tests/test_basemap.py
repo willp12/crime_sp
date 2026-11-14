@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import re
+
+import folium
 import pytest
 
-from src.basemap import CARTO_POSITRON_URL, criar_tile_layer
+from src.basemap import CARTO_MAX_NATIVE_ZOOM, CARTO_POSITRON_URL, criar_tile_layer
 
 # Host antigo, sem key: hoje so devolve tiles com a marca d'agua do CARTO
 HOST_ANTIGO = "{s}.basemaps.cartocdn.com"
@@ -24,6 +27,16 @@ def test_com_key_exibe_atribuicao_do_carto_e_do_osm() -> None:
 
     assert "CARTO" in attr
     assert "OpenStreetMap" in attr
+
+
+def test_com_key_amplia_tiles_do_zoom_nativo_ate_o_zoom_maximo() -> None:
+    # O CARTO so gera tiles ate o zoom 18. Se o Leaflet pedir os do 19/20, o
+    # mapa fica cinza e sem nomes de rua: ele tem que ampliar os do 18
+    html = folium.Map(tiles=criar_tile_layer("abc123")).get_root().render()
+
+    assert CARTO_MAX_NATIVE_ZOOM == 18
+    assert re.search(r'"maxNativeZoom":\s*18\b', html)
+    assert re.search(r'"maxZoom":\s*20\b', html)
 
 
 def test_key_e_escapada_e_sem_espacos_nas_pontas() -> None:

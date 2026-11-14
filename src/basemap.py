@@ -14,6 +14,11 @@ CARTO_POSITRON_URL = (
     "https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png"
 )
 
+# Esse endpoint so gera tiles ate o zoom 18: no 19 e no 20 a requisicao falha
+# e o mapa fica cinza, sem ruas. Acima do zoom nativo o Leaflet amplia os
+# tiles do 18, e os nomes de rua continuam visiveis (um pouco menos nitidos).
+CARTO_MAX_NATIVE_ZOOM = 18
+
 # Atribuicao exigida pelos termos do CARTO em todo mapa, inclusive no plano free
 CARTO_ATTR = (
     '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> '
@@ -43,4 +48,5 @@ def criar_tile_layer(api_key: str | None) -> folium.TileLayer:
         attr=CARTO_ATTR,
         name="CARTO Positron",
         max_zoom=20,
+        max_native_zoom=CARTO_MAX_NATIVE_ZOOM,
     )
